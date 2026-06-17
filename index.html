@@ -1,3 +1,64 @@
+import os
+import numpy as np
+import rasterio
+import matplotlib
+matplotlib.use('Agg') # Wajib untuk web agar grafik diproses di background
+import matplotlib.pyplot as plt
+from flask import Flask, render_template_string, request, url_for
+
+# Inisialisasi Aplikasi Flask
+app = Flask(__name__)
+
+# Membuat folder otomatis saat script dijalankan
+os.makedirs('uploads', exist_ok=True)
+os.makedirs('static', exist_ok=True)
+
+# ==========================================
+# KODE HTML DALAM BENTUK STRING
+# ==========================================
+
+HTML_INDEX = """
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Web GIS - Deteksi Mineral</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f4f9; }
+        .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 600px; margin: auto; }
+        h2 { text-align: center; color: #333; }
+        label { font-weight: bold; margin-top: 10px; display: block; }
+        input[type="file"] { margin-bottom: 20px; width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        button { background-color: #28a745; color: white; border: none; padding: 15px; width: 100%; font-size: 16px; border-radius: 4px; cursor: pointer; }
+        button:hover { background-color: #218838; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Deteksi Mineral Landsat 8</h2>
+        <p style="text-align:center; color:#666;">Silakan unggah band citra (B2, B4, B6, B7) berformat .TIF</p>
+        
+        <form action="/proses" method="POST" enctype="multipart/form-data">
+            <label>Upload Band 2 (Blue):</label>
+            <input type="file" name="band2" accept=".TIF,.tif" required>
+
+            <label>Upload Band 4 (Red):</label>
+            <input type="file" name="band4" accept=".TIF,.tif" required>
+
+            <label>Upload Band 6 (SWIR 1):</label>
+            <input type="file" name="band6" accept=".TIF,.tif" required>
+
+            <label>Upload Band 7 (SWIR 2):</label>
+            <input type="file" name="band7" accept=".TIF,.tif" required>
+
+            <button type="submit">Proses Analisis Mineral</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+HTML_RESULT = """
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -29,3 +90,99 @@
     </div>
 </body>
 </html>
+"""
+
+# ==========================================
+# LOGIKA BACKEND PYTHON (FLASK)
+# ==========================================
+
+@app.route('/')
+def index():
+    # Menggunakan render_template_string untuk membaca string HTML
+    return render_template_string(HTML_INDEX)
+
+@app.route('/proses', methods=['POST'])
+def proses_multi_mineral():
+    print("Menerima file dari web...")
+    
+    # 1. Menangkap file yang diunggah dari HTML
+    file_b2 = request.files['band2']
+    file_b4 = request.files['band4']
+    file_b6 = request.files['band6']
+    file_b7 = request.files['band7']
+
+    # 2. Simpan sementara ke folder 'uploads'
+    path_b2 = os.path.join('uploads', file_b2.filename)
+    path_b4 = os.path.join('uploads', file_b4.filename)
+    path_b6 = os.path.join('uploads', file_b6.filename)
+    path_b7 = os.path.join('uploads', file_b7.filename)
+    
+    file_b2.save(path_b2)
+    file_b4.save(path_b4)
+    file_b6.save(path_b6)
+    file_b7.save(path_b7)
+
+    # 3. Membaca data spasial citra
+    print("Membaca data piksel...")
+    with rasterio.open(path_b4) as src:
+        band_red = src.read(1).astype('float32')
+        meta_output = src.meta.copy()
+        
+    with rasterio.open(path_b2) as src: band_blue = src.read(1).astype('float32')
+    with rasterio.open(path_b6) as src: band_swir1 = src.read(1).astype('float32')
+    with rasterio.open(path_b7) as src: band_swir2 = src.read(1).astype('float32')
+
+    # 4. Kalkulasi Band Ratioing
+    print("Menghitung indeks mineral...")
+    with np.errstate(divide='ignore', invalid='ignore'):
+        rasio_iron = np.where(band_blue == 0, 0, band_red / band_blue)
+        rasio_iron = np.nan_to_num(rasio_iron)
+        
+        rasio_clay = np.where(band_swir2 == 0, 0, band_swir1 / band_swir2)
+        rasio_clay = np.nan_to_num(rasio_clay)
+
+    # 5. Klasifikasi Thresholding
+    threshold_iron = 1.4
+    threshold_clay = 1.5
+    peta_iron = np.where(rasio_iron > threshold_iron, 1, 0)
+    peta_clay = np.where(rasio_clay > threshold_clay, 1, 0)
+
+    # 6. Simpan File .TIF ke folder 'static' agar bisa didownload via Web
+    print("Menyimpan hasil TIF...")
+    meta_output.update(dtype=rasterio.uint8, count=1, nodata=0)
+    
+    tif_iron_path = os.path.join('static', 'Hasil_Oksida_Besi.tif')
+    tif_clay_path = os.path.join('static', 'Hasil_Mineral_Lempung.tif')
+    
+    with rasterio.open(tif_iron_path, 'w', **meta_output) as dst: 
+        dst.write(peta_iron.astype(rasterio.uint8), 1)
+    with rasterio.open(tif_clay_path, 'w', **meta_output) as dst: 
+        dst.write(peta_clay.astype(rasterio.uint8), 1)
+
+    # 7. Plotting Visualisasi untuk Web
+    print("Membuat visualisasi PNG...")
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8))
+    
+    im1 = ax1.imshow(peta_iron, cmap='Reds')
+    ax1.set_title("Peta Kandungan Oksida Besi (Iron Oxide)", fontsize=12)
+    fig.colorbar(im1, ax=ax1, orientation='horizontal', pad=0.05)
+    
+    im2 = ax2.imshow(peta_clay, cmap='copper')
+    ax2.set_title("Peta Kandungan Mineral Lempung (Clay/Alunite)", fontsize=12)
+    fig.colorbar(im2, ax=ax2, orientation='horizontal', pad=0.05)
+    
+    # Simpan Gambar Gabungan
+    output_png = os.path.join('static', 'Visualisasi_Analisis_Mineral.png')
+    plt.savefig(output_png, dpi=300, bbox_inches='tight')
+    plt.close() # Kosongkan memori
+
+    print("Proses selesai, menampilkan ke web!")
+    
+    # Render string HTML hasil dengan mengirim parameter
+    return render_template_string(HTML_RESULT, 
+                                  gambar='Visualisasi_Analisis_Mineral.png',
+                                  tif_iron='Hasil_Oksida_Besi.tif',
+                                  tif_clay='Hasil_Mineral_Lempung.tif')
+
+if __name__ == "__main__":
+    app.run(debug=True)
