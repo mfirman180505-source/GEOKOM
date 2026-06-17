@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Hasil Analisis Mineral</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f4f9; text-align: center; }
+        .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 90%; margin: auto; }
+        img { max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 20px; }
+        .btn { display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; margin: 5px; }
+        .btn:hover { background-color: #0056b3; }
+        .btn-kembali { background-color: #6c757d; }
+        .btn-kembali:hover { background-color: #5a6268; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Hasil Visualisasi Analisis Mineral</h2>
+        
+        <img src="{{ url_for('static', filename=gambar) }}" alt="Peta Mineral">
+        
+        <br>
+        <h3>Download Data Spasial (.TIF)</h3>
+        <a href="{{ url_for('static', filename=tif_iron) }}" class="btn" download>Unduh Peta Oksida Besi</a>
+        <a href="{{ url_for('static', filename=tif_clay) }}" class="btn" download>Unduh Peta Mineral Lempung</a>
+        
+        <br><br>
+        <a href="/" class="btn btn-kembali">Kembali ke Halaman Upload</a>
+    </div>
+</body>
+</html>
